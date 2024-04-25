@@ -219,14 +219,16 @@ let run_on_file config ~out_dir file =
   | Dune_exec owi_project_dir -> dune_run_on_file owi_project_dir ~out_dir file
 
 let rec clear dir =
-  let names = Sys.readdir dir in
-  Array.iter (fun name ->
-      let path = Filename.concat dir name in
-      if Sys.is_regular_file path then Unix.unlink path
-      else if Sys.is_directory path then clear path)
-    names;
-  try Unix.rmdir dir with _ ->
-    Printf.eprintf "Failed to remove temp dir %s" dir
+  if Sys.file_exists dir then begin
+    let names = Sys.readdir dir in
+    Array.iter (fun name ->
+        let path = Filename.concat dir name in
+        if Sys.is_regular_file path then Unix.unlink path
+        else if Sys.is_directory path then clear path)
+      names;
+    try Unix.rmdir dir with _ ->
+      Printf.eprintf "Failed to remove temp dir %s" dir
+  end
 
 let _ = ignore clear
 
@@ -287,7 +289,7 @@ let quick_results results =
 
 let () =
   if Array.length Sys.argv < 2 then begin
-    Printf.eprintf "USE: runner [PROBLEMS_DIR] [OUTPUT_DIR] [TIMEOUT]";
+    Printf.eprintf "USE: runner [PROBLEMS_DIR] [OUTPUT_DIR] [TIMEOUT]\n%!";
     exit 1
   end
 let problems_root = Sys.argv.(1)
