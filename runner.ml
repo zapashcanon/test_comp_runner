@@ -139,18 +139,43 @@ type result =
   | Ok of int
   | Killed
 
-let rec wait_pid pid timeout =
-  let n, status = Unix.waitpid [WNOHANG] pid in
-  if n = 0 then
-    let t = Unix.gettimeofday () in
-    if t >= timeout then
+(* let rec wait_pid pid timeout = *)
+(*   let t = Unix.gettimeofday () in *)
+(*   let timeout = t +. timeout in *)
+(*   let n, status = Unix.waitpid [WNOHANG] pid in *)
+(*   if n = 0 then *)
+(*     let t = Unix.gettimeofday () in *)
+(*     if t >= timeout then *)
+(*       let () = Unix.kill pid 9 in *)
+(*       let _n, _status = Unix.waitpid [] pid in *)
+(*       Timeout *)
+(*     else *)
+(*       let () = Unix.sleepf 0.1 in *)
+(*       wait_pid pid timeout *)
+(*   else *)
+(*     match status with *)
+(*     | WEXITED code -> Ok code *)
+(*     | _ -> Killed *)
+
+exception Sigchld
+
+let wait_pid pid timeout =
+  let did_timeout = ref false in
+  let () =
+    try
+      let _ =
+        Sys.set_signal Sys.sigchld (Signal_handle (fun _ -> raise Sigchld)) in
+      Unix.sleepf timeout;
+      did_timeout := true;
       let () = Unix.kill pid 9 in
-      let _n, _status = Unix.waitpid [] pid in
-      Timeout
-    else
-      let () = Unix.sleepf 0.1 in
-      wait_pid pid timeout
-  else
+      let _ = Sys.set_signal Sys.sigchld Signal_default in
+      ()
+    with Sigchld -> ()
+  in
+  let _ = Sys.set_signal Sys.sigchld Signal_default in
+  let n, status = Unix.waitpid [] pid in
+  assert(n = pid);
+  if !did_timeout then Timeout else
     match status with
     | WEXITED code -> Ok code
     | _ -> Killed
@@ -168,13 +193,12 @@ let run_on_file config file =
   | Dune_exec owi_project_dir -> dune_run_on_file owi_project_dir file
 
 let fork_and_run_on_file config file =
-  let t = Unix.gettimeofday () in
   let pid = Unix.fork () in
   let result =
     if pid = 0 then
       run_on_file config file
     else
-      wait_pid pid (t +. timeout)
+      wait_pid pid timeout
   in
   match result with
   | Timeout -> Printf.eprintf "Timeout\n%!"
