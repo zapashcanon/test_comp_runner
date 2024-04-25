@@ -26,8 +26,10 @@ type runnable =
   | In_path of string
 
 type config =
-  { problems_root : path;
+  { timeout: float;
+    problems_root : path;
     runnable : runnable;
+    output_dir : path;
   }
 
 let good_problem (_name, problem) =
@@ -48,8 +50,8 @@ let rec filter_test tree =
   in
   { files; dirs }
 
-let (let*) = Option.bind
-let (let+) v f = Option.map f v
+let ( let* ) = Option.bind
+let ( let+ ) v f = Option.map f v
 
 let object_field (yml : Yaml.value) (field : string) =
   match yml with
@@ -104,24 +106,25 @@ let list_yml_files ?(max=max_int) dir =
     Array.fold_left (add dir) {files = []; dirs = []} files
 
   and add dir acc name =
-    if !count > to_get then acc else
+    if !count >= to_get then acc else
     let path = Filename.concat dir name in
     if Sys.is_directory path then
-      let () = Printf.eprintf "Enter: %s\n%!" name in
+      (* let () = Printf.eprintf "Enter: %s\n%!" name in *)
       let subdir = list_yml_files path in
-      let () = Printf.eprintf "Leave: %s\n%!" name in
+      (* let () = Printf.eprintf "Leave: %s\n%!" name in *)
       { acc with dirs = (name, subdir) :: acc.dirs }
     else if Filename.check_suffix name ".yml" then
       let yml = parse_file path in
-      incr count;
       match yml with
       | Ok yml -> begin
-        Printf.eprintf "OK: %s\n%!" name;
+        (* Printf.eprintf "OK: %s\n%!" name; *)
         match problem yml with
         | None ->
           Printf.eprintf "Not a good problem file: %s\n%!" name;
           acc
         | Some problem ->
+          incr count;
+          (* Printf.eprintf "problem: %s\n%!" problem.input_files; *)
           { acc with files = (name, problem) :: acc.files }
       end
       | Error (`Msg msg) ->
@@ -132,11 +135,17 @@ let list_yml_files ?(max=max_int) dir =
   in
   list_yml_files dir
 
-let timeout = 2.
+type times = {
+  clock : float;
+  user : float;
+  system : float;
+}
 
-type result =
-  | Timeout
-  | Ok of int
+type process_result =
+  | Timeout of times
+  | Nothing of times
+  | Reached of times
+  | Other of int * times
   | Killed
 
 (* let rec wait_pid pid timeout = *)
@@ -161,6 +170,7 @@ exception Sigchld
 
 let wait_pid pid timeout =
   let did_timeout = ref false in
+  let start_time = Unix.gettimeofday () in
   let () =
     try
       let _ =
@@ -173,52 +183,149 @@ let wait_pid pid timeout =
     with Sigchld -> ()
   in
   let _ = Sys.set_signal Sys.sigchld Signal_default in
-  let n, status = Unix.waitpid [] pid in
-  assert(n = pid);
-  if !did_timeout then Timeout else
-    match status with
-    | WEXITED code -> Ok code
+  let waited = Wait4.wait4 ~pid in
+  let end_time = Unix.gettimeofday () in
+  assert(waited.pid = pid);
+  let times = {
+    clock = end_time -. start_time;
+    user = waited.user_time;
+    system = waited.system_time;
+  } in
+  if !did_timeout then Timeout times else
+    match waited.status with
+    | WEXITED code ->
+      if code = 0 then Nothing times
+      else if code = 13 then Reached times
+      else Other (code, times)
     | _ -> Killed
 
-let dune_run_on_file owi_project_dir file =
+let dune_run_on_file owi_project_dir ~out_dir file =
   Unix.chdir owi_project_dir;
-  Unix.execvp "dune" [|"dune"; "exec"; "src/bin/owi.exe"; "--"; "c"; "--testcomp"; file |]
+  Unix.execvp "dune" [|"dune"; "exec"; "src/bin/owi.exe"; "--"; "c"; "-o"; out_dir; file |]
 
-let path_run_on_file owi file =
-  Unix.execvp owi [| owi; "c"; "--testcomp"; file |]
+let path_run_on_file owi ~out_dir file =
+  Unix.execvp owi [| owi; "c"; "-o"; out_dir; file |]
 
-let run_on_file config file =
+let run_on_file config ~out_dir file =
+  let new_stdout = Unix.openfile (Filename.concat out_dir "stdout") [O_CREAT; O_WRONLY] 0o666 in
+  let new_stderr = Unix.openfile (Filename.concat out_dir "stderr") [O_CREAT; O_WRONLY] 0o666 in
+  Unix.dup2 new_stdout Unix.stdout;
+  Unix.dup2 new_stderr Unix.stderr;
+  Unix.close new_stdout;
+  Unix.close new_stderr;
+  let out_dir = Filename.concat out_dir "owi" in
   match config.runnable with
-  | In_path owi -> path_run_on_file owi file
-  | Dune_exec owi_project_dir -> dune_run_on_file owi_project_dir file
+  | In_path owi -> path_run_on_file owi ~out_dir file
+  | Dune_exec owi_project_dir -> dune_run_on_file owi_project_dir ~out_dir file
 
-let fork_and_run_on_file config file =
+let rec clear dir =
+  let names = Sys.readdir dir in
+  Array.iter (fun name ->
+      let path = Filename.concat dir name in
+      if Sys.is_regular_file path then Unix.unlink path
+      else if Sys.is_directory path then clear path)
+    names;
+  try Unix.rmdir dir with _ ->
+    Printf.eprintf "Failed to remove temp dir %s" dir
+
+let _ = ignore clear
+
+let rec mkdir dir =
+  let dirname = Filename.dirname dir in
+  if not (Sys.is_directory dirname) then
+    mkdir dirname;
+  Unix.mkdir dir 0o777
+
+let fork_and_run_on_file i config file =
+  (* let out_dir = Filename.temp_dir "owi_result" "tmp" in *)
+  let out_dir = Filename.concat config.output_dir (string_of_int i) in
+  Unix.mkdir out_dir 0o777;
   let pid = Unix.fork () in
   let result =
     if pid = 0 then
-      run_on_file config file
+      run_on_file config ~out_dir file
     else
-      wait_pid pid timeout
+      wait_pid pid config.timeout
   in
-  match result with
-  | Timeout -> Printf.eprintf "Timeout\n%!"
-  | Ok code -> Printf.eprintf "Ok %i\n%!" code
-  | Killed -> Printf.eprintf "Killed\n%!"
+  let () =
+    match result with
+    | Timeout times -> Printf.eprintf "Timeout in %g %g %g\n%!" times.clock times.user times.system
+    | Nothing times -> Printf.eprintf "Nothing in %g %g %g\n%!" times.clock times.user times.system
+    | Reached times -> Printf.eprintf "Reached in %g %g %g\n%!" times.clock times.user times.system
+    | Other (code, times) -> Printf.eprintf "Other %i in %g %g %g\n%!" code times.clock times.user times.system
+    | Killed -> Printf.eprintf "Killed\n%!"
+  in
+  (* clear temp_dir; *)
+  result
 
 let rec tree_to_list dir tree =
   let files = List.map (fun (_name, problem) ->
-      Filename.concat dir problem.input_files) tree.files in
+      Filename.concat dir problem.input_files, problem) tree.files in
   let dirs = List.map (fun (name, tree) -> tree_to_list (Filename.concat dir name) tree) tree.dirs in
   List.flatten (files :: dirs)
 
-let config = {
-  problems_root = "/home/chambart/test/Test-Comp/sv-benchmarks/c";
-  runnable = Dune_exec "/home/chambart/code/woi_branches/main";
+type result = {
+  problem : problem;
+  result : process_result;
 }
 
+let results = ref []
+
+let quick_results results =
+  let nothing = ref 0 in
+  let reached = ref 0 in
+  let timeout = ref 0 in
+  let bad = ref 0 in
+  List.iter (fun res ->
+      ignore res.problem;
+      match res.result with
+      | Nothing _ -> incr nothing
+      | Reached _ -> incr reached
+      | Timeout _ -> incr timeout
+      | Other _ | Killed -> incr bad) results;
+  Printf.printf "Nothing: %6i    Reached: %6i    Timeout: %6i    Bad: %6i\n%!" !nothing !reached !timeout !bad
+
+let () =
+  if Array.length Sys.argv < 2 then begin
+    Printf.eprintf "USE: runner [PROBLEMS_DIR] [OUTPUT_DIR] [TIMEOUT]";
+    exit 1
+  end
+let problems_root = Sys.argv.(1)
+let runnable = In_path "owi"
+let output_dir = Sys.argv.(2)
+let timeout =
+  if Array.length Sys.argv >= 5 then
+    float_of_string Sys.argv.(3)
+  else
+    5.
+let max_explo =
+  if Array.length Sys.argv >= 5 then Some (int_of_string Sys.argv.(4))
+  else None
+
+let config = {
+  timeout; problems_root; runnable; output_dir
+}
+
+(* let config = { *)
+(*   timeout = 5.; *)
+(*   problems_root = "/home/chambart/test/Test-Comp/sv-benchmarks/c"; *)
+(*   runnable = Dune_exec "/home/chambart/code/woi_branches/main"; *)
+(*   output_dir = "/tmp/ploup/"; *)
+(* } *)
+
+
 let t =
-  let t = list_yml_files ~max:3 config.problems_root in
+  let t = list_yml_files ?max:max_explo config.problems_root in
   filter_test t
 
 let l = tree_to_list config.problems_root t
-let () = List.iter (fork_and_run_on_file config) l
+let () = Printf.printf "RUNNING %i problems\n%!" (List.length l)
+let () = clear config.output_dir
+let () = mkdir config.output_dir
+let () = List.iteri (fun i (file, problem) ->
+    Printf.printf "Run %s\n%!" file;
+    let result = fork_and_run_on_file i config file in
+    results := {problem; result} :: !results;
+    quick_results !results
+  ) l
+
