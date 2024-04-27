@@ -1,13 +1,11 @@
-
-type wait_result = {
-  pid : int;
-  status : Unix.process_status;
-  user_time : float;
-  system_time : float;
-}
+type wait_result =
+  { pid : int
+  ; status : Unix.process_status
+  ; user_time : float
+  ; system_time : float
+  }
 
 external wait4 : pid:int -> wait_result = "caml_wait4"
-
 
 (*
    let pid =

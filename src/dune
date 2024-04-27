@@ -1,0 +1,6 @@
+(executable
+ (name runner)
+ (libraries yaml unix)
+ (foreign_stubs
+  (language c)
+  (names wait4)))
