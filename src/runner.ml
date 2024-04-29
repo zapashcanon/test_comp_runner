@@ -181,10 +181,18 @@ let wait_pid pid timeout =
       else Other (code, times)
     | _ -> Killed
 
-let path_run_on_file owi ~out_dir file =
-  Unix.execvp owi [| owi; "c"; "--unsafe"; "-o"; out_dir; file |]
+let path_run_owi_on_file ~out_dir file =
+  Unix.execvp "owi" [| "owi"; "c"; "--unsafe"; "-o"; out_dir; file |]
 
-let run_on_file ~out_dir file =
+let path_run_klee_on_file ~out_dir file =
+  let _ : unit =
+    Unix.execvp "clang" [| "clang"; "-emit-llvm"; "-c"; file; "-o"; out_dir |]
+  in
+  let file = Filename.chop_extension file in
+  let file = Filename.concat out_dir file ^ ".bc" in
+  Unix.execv "/snap/bin/klee" [| "/snap/bin/klee"; file |]
+
+let run_on_file_owi ~out_dir file =
   let new_stdout =
     Unix.openfile (Filename.concat out_dir "stdout") [ O_CREAT; O_WRONLY ] 0o666
   in
@@ -196,7 +204,21 @@ let run_on_file ~out_dir file =
   Unix.close new_stdout;
   Unix.close new_stderr;
   let out_dir = Filename.concat out_dir "owi" in
-  path_run_on_file "owi" ~out_dir file
+  path_run_owi_on_file ~out_dir file
+
+let run_on_file_klee ~out_dir file =
+  let new_stdout =
+    Unix.openfile (Filename.concat out_dir "stdout") [ O_CREAT; O_WRONLY ] 0o666
+  in
+  let new_stderr =
+    Unix.openfile (Filename.concat out_dir "stderr") [ O_CREAT; O_WRONLY ] 0o666
+  in
+  Unix.dup2 new_stdout Unix.stdout;
+  Unix.dup2 new_stderr Unix.stderr;
+  Unix.close new_stdout;
+  Unix.close new_stderr;
+  let out_dir = Filename.concat out_dir "klee" in
+  path_run_klee_on_file ~out_dir file
 
 let rec clear dir =
   if Sys.file_exists dir then begin
@@ -216,12 +238,14 @@ let rec mkdir dir =
   if not (Sys.is_directory dirname) then mkdir dirname;
   Unix.mkdir dir 0o777
 
-let fork_and_run_on_file i config file =
-  let out_dir = Filename.concat config.output_dir (string_of_int i) in
+let fork_and_run_on_file f tool i config file =
+  let out_dir =
+    Filename.concat config.output_dir (Format.sprintf "%s-%d" tool i)
+  in
   Unix.mkdir out_dir 0o777;
   let pid = Unix.fork () in
   let result =
-    if pid = 0 then run_on_file ~out_dir file else wait_pid pid config.timeout
+    if pid = 0 then f ~out_dir file else wait_pid pid config.timeout
   in
   begin
     match result with
@@ -257,8 +281,6 @@ type result =
   ; result : process_result
   }
 
-let results = ref []
-
 let quick_results results =
   let nothing = ref 0 in
   let reached = ref 0 in
@@ -293,15 +315,24 @@ let t =
 
 let l = tree_to_list config.problems_root t
 
+let results_owi = ref []
+
+let results_klee = ref []
+
 let () =
   clear config.output_dir;
   mkdir config.output_dir;
   let len = List.length l in
   List.iteri
     (fun i (file, problem) ->
-      Format.printf "Run %d/%d: %s@\n  @[<v>" i len file;
-      let result = fork_and_run_on_file i config file in
-      results := { problem; result } :: !results;
-      quick_results !results;
+      Format.printf "Run owi %d/%d: %s@\n  @[<v>" i len file;
+      let result = fork_and_run_on_file run_on_file_owi "owi" i config file in
+      results_owi := { problem; result } :: !results_owi;
+      quick_results !results_owi;
+      Format.printf "@]@\n%!";
+      Format.printf "Run klee %d/%d: %s@\n  @[<v>" i len file;
+      let result = fork_and_run_on_file run_on_file_klee "klee" i config file in
+      results_klee := { problem; result } :: !results_klee;
+      quick_results !results_klee;
       Format.printf "@]@\n%!" )
     l

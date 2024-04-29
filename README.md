@@ -1,3 +1,14 @@
+# Installing dependencies:
+
+## Klee
+
+```shell-session
+$ sudo apt install snapd
+$ sudo snap install core
+$ sudo snap install klee
+$ /snap/bin/klee --help
+```
+
 # Usage:
 
 ```shell-session
