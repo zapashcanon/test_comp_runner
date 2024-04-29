@@ -1,6 +1,17 @@
 (executable
  (name runner)
+ (modules runner whitelist wait4)
  (libraries yaml unix)
  (foreign_stubs
   (language c)
   (names wait4)))
+
+(rule
+ (deps whitelist.txt)
+ (action
+ (with-stdout-to
+  whitelist.ml
+  (progn
+   (echo "let v = {|")
+   (cat whitelist.txt)
+   (echo "|}")))))

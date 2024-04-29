@@ -28,6 +28,14 @@ type config =
   ; output_dir : path
   }
 
+let is_in_whitelist =
+  let tbl = Hashtbl.create 2048 in
+  String.split_on_char '\n' Whitelist.v
+  |> List.iter (fun file ->
+         let file = Filename.concat "sv-benchmarks/c" file in
+         Hashtbl.replace tbl file () );
+  fun file -> Hashtbl.mem tbl file
+
 let good_problem (_name, problem) =
   problem.language = "C"
   && List.exists
@@ -102,21 +110,24 @@ let list_yml_files ?(max = max_int) dir =
       if Sys.is_directory path then
         let subdir = list_yml_files path in
         { acc with dirs = (name, subdir) :: acc.dirs }
-      else if Filename.check_suffix name ".yml" then (
-        let yml = parse_file path in
-        match yml with
-        | Ok yml -> begin
-          match problem yml with
-          | None ->
-            Format.eprintf "Not a good problem file: %s@\n%!" name;
+      else if Filename.check_suffix name ".yml" then begin
+        if not @@ is_in_whitelist path then acc
+        else
+          let yml = parse_file path in
+          match yml with
+          | Ok yml -> begin
+            match problem yml with
+            | None ->
+              Format.eprintf "Not a good problem file: %s@\n%!" name;
+              acc
+            | Some problem ->
+              incr count;
+              { acc with files = (name, problem) :: acc.files }
+          end
+          | Error (`Msg msg) ->
+            Format.eprintf "Couldn't parse file:@\n%s\nreason: %s@\n%!" path msg;
             acc
-          | Some problem ->
-            incr count;
-            { acc with files = (name, problem) :: acc.files }
-        end
-        | Error (`Msg msg) ->
-          Format.eprintf "Couldn't parse file:@\n%s\nreason: %s@\n%!" path msg;
-          acc )
+      end
       else acc
   in
   list_yml_files dir
