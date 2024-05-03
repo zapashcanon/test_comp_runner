@@ -14,3 +14,9 @@ $ dune exec -- src/runner.exe 5 1000 # timeout of 5 seconds and limit of 1000 fi
 ```
 
 (It's actually not really a number of files, but it's quite close)
+
+# Generate the report:
+
+```shell-session
+$ dune exec -- src/report.exe src/stdout # this is an example of an old run, use the correct file instead
+```

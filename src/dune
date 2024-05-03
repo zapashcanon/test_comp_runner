@@ -15,3 +15,8 @@
    (echo "let v = {|")
    (cat whitelist.txt)
    (echo "|}")))))
+
+(executable
+  (name report)
+  (modules report)
+  (libraries fpath))
