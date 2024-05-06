@@ -19,4 +19,4 @@
 (executable
   (name report)
   (modules report)
-  (libraries fpath))
+  (libraries fpath gnuplot))

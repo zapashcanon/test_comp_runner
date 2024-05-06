@@ -143,18 +143,64 @@ let () =
   pp fmt "bad = %d@\n" count_bad;
   pp fmt "killed = %d@\n" count_killed
 
-(*
-   let () =
-     let open Gnuplot in
-     let gp = create () in
-     plot_many gp ~title:"offres" ~use_grid:true
-       ~range:(Range.XY (0., 1500., 0., 1500.))
-       ~labels:
-         (Labels.create ~x:"avant" ~y:"après" ())
-       [ Series.lines_func "x" ~title:"Offre 0" ~color:`Green
-       ; Series.lines_func "49 + (70*x)/100" ~title:"Offre 1" ~color:`Blue
-       ; Series.lines_func "399 + (40*x)/100" ~title:"Offre 2" ~color:`Red
-       ];
-     Unix.sleep 30;
-     close gp
-*)
+let () =
+  let open Gnuplot in
+  let gp = create () in
+
+  let max_time = 70 in
+
+  let to_distrib times =
+    List.init max_time (fun i ->
+        List.fold_left
+          (fun count x ->
+            let x = int_of_float x in
+            if x = i then count +. 1. else count )
+          0. times )
+  in
+
+  let weight = 0 in
+  let fill = `Solid in
+
+  let times_reached =
+    List.filter_map
+      (fun r -> match r.res with Reached (t1, _, _) -> Some t1 | _ -> None)
+      runs
+    |> to_distrib
+    |> Series.histogram ~title:"Owi (reached)" ~color:`Green ~weight ~fill
+  in
+
+  let times_timeout =
+    List.filter_map
+      (fun r -> match r.res with Timeout (t1, _, _) -> Some t1 | _ -> None)
+      runs
+    |> to_distrib
+    |> Series.histogram ~title:"Owi (timeout)" ~color:`Red ~weight ~fill
+  in
+
+  let times_bad =
+    List.filter_map
+      (fun r -> match r.res with Bad (_, t1, _, _) -> Some t1 | _ -> None)
+      runs
+    |> to_distrib
+    |> Series.histogram ~title:"Owi (bad)" ~color:`Cyan ~weight ~fill
+  in
+
+  let title = "Distribution of execution times" in
+  let output = Output.create (`Png "distrib.png") in
+  let use_grid = true in
+  let fill = `Custom "histogram rowstacked" in
+
+  let min_time = 0. in
+
+  let min_tests = 0. in
+  let max_tests = 800. in
+
+  let range =
+    Range.XY (min_time, float_of_int max_time, min_tests, max_tests)
+  in
+  let labels = Labels.create ~x:"time (s)" ~y:"number of tests" () in
+
+  plot_many ~output ~title ~use_grid ~fill ~range ~labels gp
+    [ times_reached; times_timeout; times_bad ];
+
+  close gp
