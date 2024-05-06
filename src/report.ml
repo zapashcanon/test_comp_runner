@@ -167,7 +167,7 @@ let () =
           0. times )
   in
 
-  let weight = 0 in
+  let weight = 1 in
   let fill = `Solid in
 
   let times_reached =
@@ -205,7 +205,7 @@ let () =
   let use_grid = true in
   let fill = `Solid in
 
-  let min_time = 0. in
+  let min_time = ~-.(float_of_int weight) /. 2. in
 
   let range = Range.X (min_time, float_of_int max_time) in
   let labels = Labels.create ~x:"time (s)" ~y:"number of tests" () in
