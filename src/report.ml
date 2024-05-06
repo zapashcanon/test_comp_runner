@@ -147,7 +147,16 @@ let () =
   let open Gnuplot in
   let gp = create () in
 
-  let max_time = 70 in
+  let max_time =
+    List.fold_left
+      (fun current_max r ->
+        match r.res with
+        | Reached (t, _, _) | Timeout (t, _, _) | Bad (_, t, _, _) ->
+          max t current_max
+        | Killed | Nothing -> current_max )
+      0. runs
+    |> int_of_float |> ( + ) 5
+  in
 
   let to_distrib times =
     List.init max_time (fun i ->
@@ -166,7 +175,9 @@ let () =
       (fun r -> match r.res with Reached (t1, _, _) -> Some t1 | _ -> None)
       runs
     |> to_distrib
-    |> Series.histogram ~title:"Owi (reached)" ~color:`Green ~weight ~fill
+    |> Series.histogram ~title:"Owi (reached)"
+         ~color:(`Rgb (0x7A, 0xA9, 0x5C))
+         ~weight ~fill
   in
 
   let times_timeout =
@@ -174,7 +185,9 @@ let () =
       (fun r -> match r.res with Timeout (t1, _, _) -> Some t1 | _ -> None)
       runs
     |> to_distrib
-    |> Series.histogram ~title:"Owi (timeout)" ~color:`Red ~weight ~fill
+    |> Series.histogram ~title:"Owi (timeout)"
+         ~color:(`Rgb (0xA7, 0x00, 0x1E))
+         ~weight ~fill
   in
 
   let times_bad =
@@ -182,25 +195,23 @@ let () =
       (fun r -> match r.res with Bad (_, t1, _, _) -> Some t1 | _ -> None)
       runs
     |> to_distrib
-    |> Series.histogram ~title:"Owi (bad)" ~color:`Cyan ~weight ~fill
+    |> Series.histogram ~title:"Owi (bad)"
+         ~color:(`Rgb (0xC0, 0xE2, 0xE9))
+         ~weight ~fill
   in
 
   let title = "Distribution of execution times" in
   let output = Output.create (`Png "distrib.png") in
   let use_grid = true in
-  let fill = `Custom "histogram rowstacked" in
+  let fill = `Solid in
 
   let min_time = 0. in
 
-  let min_tests = 0. in
-  let max_tests = 800. in
-
-  let range =
-    Range.XY (min_time, float_of_int max_time, min_tests, max_tests)
-  in
+  let range = Range.X (min_time, float_of_int max_time) in
   let labels = Labels.create ~x:"time (s)" ~y:"number of tests" () in
+  let custom = [ ("set style histogram rowstacked", "") ] in
 
-  plot_many ~output ~title ~use_grid ~fill ~range ~labels gp
+  plot_many ~output ~title ~use_grid ~fill ~range ~labels ~custom gp
     [ times_reached; times_timeout; times_bad ];
 
   close gp
