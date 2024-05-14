@@ -1212,6 +1212,5 @@ busybox-1.22.0/ls-incomplete-2.yml
 busybox-1.22.0/od-4.yml
 busybox-1.22.0/printf-3.yml
 busybox-1.22.0/test-1.yml
-openbsd-6.2/if_etherip-unreach-call.yml
 ldv-linux-3.7.3/main0_drivers--media--dvb-frontends--stv090x-ko---32_7a--linux-3.7.3.yml
 ldv-consumption/32_7a_cilled_linux-3.8-rc1-32_7a-drivers--media--dvb-frontends--stv090x.ko-ldv_main0_sequence_infinite_withcheck_stateful.cil.out.yml
