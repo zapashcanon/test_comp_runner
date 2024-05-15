@@ -182,7 +182,7 @@ let wait_pid pid timeout =
     | _ -> Killed
 
 let path_run_on_file owi ~out_dir file =
-  Unix.execvp owi [| owi; "c"; "--unsafe"; "-o"; out_dir; file |]
+  Unix.execvp owi [| owi; "c"; "--unsafe"; "-O0"; "-o"; out_dir; file |]
 
 let run_on_file ~out_dir file =
   let new_stdout =
@@ -296,7 +296,7 @@ let l = tree_to_list config.problems_root t
 let () =
   clear config.output_dir;
   mkdir config.output_dir;
-  let len = List.length l in
+  let len = List.length l - 1 in
   List.iteri
     (fun i (file, problem) ->
       Format.printf "Run %d/%d: %s@\n  @[<v>" i len file;
@@ -305,3 +305,5 @@ let () =
       quick_results !results;
       Format.printf "@]@\n%!" )
     l
+
+(* TODO: sort tests by name in l *)
